@@ -263,8 +263,6 @@ def getBuildConfigStringProperty(String propertyName, String defaultValue) {
     def value = getBuildConfigProperty(propertyName, defaultValue)
     return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
 }
-apply plugin: 'com.google.gms.google-services'
-
 task checkVisibility {
     doFirst {
         def isPrivateBuild = project.gradle.startParameter.taskNames.find {
