@@ -113,6 +113,9 @@ android {
         minSdkVersion 21
         targetSdkVersion 35
 
+        buildConfigField "int", "TELEGRAM_API_ID", getBuildConfigProperty("TELEGRAM_API_ID", "0")
+        buildConfigField "String", "TELEGRAM_API_HASH", getBuildConfigStringProperty("TELEGRAM_API_HASH", "")
+
         vectorDrawables.generatedDensities = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi']
 
         multiDexEnabled true
@@ -238,6 +241,27 @@ def getProps(String propName) {
     } else {
         return "";
     }
+}
+
+def getBuildConfigProperty(String propertyName, String defaultValue) {
+    def value = project.findProperty(propertyName)
+    if (value == null || value.toString().trim().isEmpty()) {
+        def propsFile = rootProject.file('local.properties')
+        if (propsFile.exists()) {
+            def props = new Properties()
+            props.load(new FileInputStream(propsFile))
+            value = props[propertyName]
+        }
+    }
+    if (value == null || value.toString().trim().isEmpty()) {
+        value = System.getenv(propertyName)
+    }
+    return value == null || value.toString().trim().isEmpty() ? defaultValue : value.toString().trim()
+}
+
+def getBuildConfigStringProperty(String propertyName, String defaultValue) {
+    def value = getBuildConfigProperty(propertyName, defaultValue)
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
 }
 apply plugin: 'com.google.gms.google-services'
 

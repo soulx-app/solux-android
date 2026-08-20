@@ -3888,6 +3888,11 @@
     <string name="ActionChangeCreator">un1 has transferred ownership of the group to un2.</string>
     <string name="UnsupportedMedia2">This message is not supported on your version of Telegram. Please update to the latest version.</string>
     <string name="YourVersionIsLatest">Your version is up to date.</string>
+    <string name="SoluxUpdateTitle">Solux update available</string>
+    <string name="SoluxUpdateVersion">Version %1$s (%2$d)</string>
+    <string name="SoluxUpdateDownload">Open download</string>
+    <string name="SoluxUpdateLater">Later</string>
+    <string name="SoluxVersionIsLatest">Your Solux version is up to date.</string>
     <string name="AttachPhoto">Photo</string>
     <string name="AttachVideo">Video</string>
     <string name="AttachLivePhoto">Motion Photo</string>

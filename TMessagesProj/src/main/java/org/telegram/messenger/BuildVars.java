@@ -26,9 +26,12 @@ public class BuildVars {
     public static boolean NO_SCOPED_STORAGE = Build.VERSION.SDK_INT <= 29;
     public static String BUILD_VERSION_STRING = BuildConfig.BUILD_VERSION_STRING;
 
-    // Configure your own Telegram application credentials before building a usable client.
-    public static int APP_ID = 0;
-    public static String APP_HASH = "";
+    // Credentials are injected into BuildConfig from local.properties or CI secrets.
+    public static int APP_ID = BuildConfig.TELEGRAM_API_ID;
+    public static String APP_HASH = BuildConfig.TELEGRAM_API_HASH;
+
+    public static final String GITHUB_REPOSITORY = "soulx-app/solux-android";
+    public static final String GITHUB_RELEASES_API = "https://api.github.com/repos/" + GITHUB_REPOSITORY + "/releases/latest";
 
     // SafetyNet key for Google Identity SDK, set it to empty to disable
     public static String SAFETYNET_KEY = "";

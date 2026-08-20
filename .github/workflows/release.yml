@@ -1,0 +1,149 @@
+name: Build and publish Solux Android
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: solux-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android toolchain
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.10.2"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TELEGRAM_API_ID" || { echo "Missing TELEGRAM_API_ID secret"; exit 1; }
+          test -n "$TELEGRAM_API_HASH" || { echo "Missing TELEGRAM_API_HASH secret"; exit 1; }
+          test -n "$GOOGLE_SERVICES_JSON" || { echo "Missing GOOGLE_SERVICES_JSON secret"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing ANDROID_KEYSTORE_BASE64 secret"; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo "Missing ANDROID_KEYSTORE_PASSWORD secret"; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo "Missing ANDROID_KEY_ALIAS secret"; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo "Missing ANDROID_KEY_PASSWORD secret"; exit 1; }
+
+      - name: Prepare private build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p TMessagesProj/config
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > TMessagesProj/config/release.keystore
+          printf '%s' "$GOOGLE_SERVICES_JSON" > TMessagesProj/google-services.json
+          printf '%s' "$GOOGLE_SERVICES_JSON" > TMessagesProj_App/google-services.json
+
+      - name: Validate version and changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_name="$(sed -n 's/^APP_VERSION_NAME=//p' gradle.properties)"
+          version_code="$(sed -n 's/^APP_VERSION_CODE=//p' gradle.properties)"
+          apk_version_code=$((version_code * 10 + 9))
+          expected_tag="v${version_name}-${apk_version_code}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            test "$GITHUB_REF_NAME" = "$expected_tag" || {
+              echo "Tag $GITHUB_REF_NAME does not match $expected_tag"; exit 1;
+            }
+            grep -q "^## \[$GITHUB_REF_NAME\]" CHANGELOG.md || {
+              echo "CHANGELOG.md has no entry for $GITHUB_REF_NAME"; exit 1;
+            }
+          fi
+          echo "VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "APK_VERSION_CODE=$apk_version_code" >> "$GITHUB_ENV"
+
+      - name: Build signed universal APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :TMessagesProj_App:assembleAfatRelease \
+            -PTELEGRAM_API_ID="$TELEGRAM_API_ID" \
+            -PTELEGRAM_API_HASH="$TELEGRAM_API_HASH" \
+            -PRELEASE_STORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" \
+            -PRELEASE_KEY_ALIAS="$ANDROID_KEY_ALIAS" \
+            -PRELEASE_KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk_path="$(find TMessagesProj_App/build/outputs/apk -type f -name app.apk -print -quit)"
+          test -f "$apk_path" || { echo "APK not found at $apk_path"; exit 1; }
+          mkdir -p dist
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            base_name="Solux-${GITHUB_REF_NAME}"
+          else
+            base_name="Solux-main-${GITHUB_SHA:0:12}"
+          fi
+          cp "$apk_path" "dist/${base_name}.apk"
+          sha256sum "dist/${base_name}.apk" > "dist/${base_name}.apk.sha256"
+          cp CHANGELOG.md "dist/CHANGELOG-${base_name}.md"
+          echo "RELEASE_ASSET=dist/${base_name}.apk" >> "$GITHUB_ENV"
+          echo "RELEASE_SHA=dist/${base_name}.apk.sha256" >> "$GITHUB_ENV"
+          echo "RELEASE_CHANGELOG=dist/CHANGELOG-${base_name}.md" >> "$GITHUB_ENV"
+          rm -f TMessagesProj/config/release.keystore TMessagesProj/google-services.json TMessagesProj_App/google-services.json
+
+      - name: Publish continuous pre-release for main
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="build-${GITHUB_SHA:0:12}"
+          gh release create "$tag" "$RELEASE_ASSET" "$RELEASE_SHA" "$RELEASE_CHANGELOG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Solux continuous build ${GITHUB_SHA:0:12}" \
+            --notes "自动构建于 main 提交 ${GITHUB_SHA}。这是测试预发布包，不参与客户端自动更新。" \
+            --prerelease
+
+      - name: Publish signed release for version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_file="release-notes.md"
+          awk -v tag="$GITHUB_REF_NAME" '$0 ~ "^## \\[" tag "\\]" {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > "$notes_file"
+          test -s "$notes_file" || { echo "Release notes are empty"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" "$RELEASE_ASSET" "$RELEASE_SHA" "$RELEASE_CHANGELOG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Solux $GITHUB_REF_NAME" \
+            --notes-file "$notes_file"
